@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, SafeAreaView, ScrollView, Switch,
+  StyleSheet, SafeAreaView, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SPACING } from '../data/theme';
@@ -13,27 +13,98 @@ export default function RegisterScreen({ navigation }) {
   const [weightUnit, setWeightUnit] = useState('KG');
   const [height, setHeight] = useState('180');
   const [weight, setWeight] = useState('75.0');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [agreed, setAgreed] = useState(false);
-  const { setUser } = useApp();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const { signup, setUser, setIsLoggedIn } = useApp();
 
-  const handleCreate = () => {
-    setUser((prev) => ({ ...prev, height: Number(height), weight: Number(weight), sex, heightUnit, weightUnit }));
+  const handleCreate = async () => {
+    if (!name || !email || !password || !confirm) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    if (password !== confirm) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
+    if (!agreed) {
+      setError('Please agree to terms and conditions');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      const userData = {
+        name,
+        height: Number(height),
+        weight: Number(weight),
+        sex,
+        heightUnit,
+        weightUnit,
+      };
+
+      const success = await signup(email, password, userData);
+      if (success) {
+        navigation.replace('Main');
+      } else {
+        setError('Registration failed. Please try again.');
+      }
+    } catch (err) {
+      const errorMessage = err.message || 'Registration failed';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMockRegister = () => {
+    // Allow users to continue with mock data for testing
+    const userData = {
+      name: name || 'Test User',
+      height: Number(height),
+      weight: Number(weight),
+      sex,
+      heightUnit,
+      weightUnit,
+      email,
+    };
+    setUser((prev) => ({ ...prev, ...userData }));
+    setIsLoggedIn(true);
     navigation.replace('Main');
   };
+
+  const isSupabaseNotConfigured = error.includes('not configured');
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.inner} showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} disabled={loading}>
           <Ionicons name="arrow-back" size={22} color={COLORS.textPrimary} />
         </TouchableOpacity>
 
         <Text style={styles.heading}>Let's Personalize{'\n'}Your Coach</Text>
         <Text style={styles.sub}>We use your stats to customize your AI plan.{'\n'}All data stays local.</Text>
+
+        {/* Error Message */}
+        {error ? (
+          <View style={styles.errorBox}>
+            <Ionicons name="alert-circle" size={16} color={COLORS.error} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
 
         {/* Physical Stats */}
         <View style={styles.section}>
@@ -47,6 +118,7 @@ export default function RegisterScreen({ navigation }) {
                   key={s}
                   onPress={() => setSex(s)}
                   style={[styles.sexBtn, sex === s && styles.sexBtnActive]}
+                  disabled={loading}
                 >
                   <Text style={[styles.sexBtnText, sex === s && styles.sexBtnTextActive]}>{s}</Text>
                 </TouchableOpacity>
@@ -67,6 +139,7 @@ export default function RegisterScreen({ navigation }) {
                 onChangeText={setHeight}
                 keyboardType="numeric"
                 placeholderTextColor={COLORS.textMuted}
+                editable={!loading}
               />
             </View>
             <View style={styles.unitToggle}>
@@ -75,6 +148,7 @@ export default function RegisterScreen({ navigation }) {
                   key={u}
                   onPress={() => setHeightUnit(u)}
                   style={[styles.unitBtn, heightUnit === u && styles.unitBtnActive]}
+                  disabled={loading}
                 >
                   <Text style={[styles.unitBtnText, heightUnit === u && styles.unitBtnTextActive]}>{u}</Text>
                 </TouchableOpacity>
@@ -95,6 +169,7 @@ export default function RegisterScreen({ navigation }) {
                 onChangeText={setWeight}
                 keyboardType="numeric"
                 placeholderTextColor={COLORS.textMuted}
+                editable={!loading}
               />
             </View>
             <View style={styles.unitToggle}>
@@ -103,6 +178,7 @@ export default function RegisterScreen({ navigation }) {
                   key={u}
                   onPress={() => setWeightUnit(u)}
                   style={[styles.unitBtn, weightUnit === u && styles.unitBtnActive]}
+                  disabled={loading}
                 >
                   <Text style={[styles.unitBtnText, weightUnit === u && styles.unitBtnTextActive]}>{u}</Text>
                 </TouchableOpacity>
@@ -116,12 +192,29 @@ export default function RegisterScreen({ navigation }) {
           <View style={styles.inputWrap}>
             <TextInput
               style={styles.input}
+              placeholder="Full Name"
+              placeholderTextColor={COLORS.textMuted}
+              value={name}
+              onChangeText={(text) => {
+                setName(text);
+                setError('');
+              }}
+              editable={!loading}
+            />
+          </View>
+          <View style={styles.inputWrap}>
+            <TextInput
+              style={styles.input}
               placeholder="Email Address"
               placeholderTextColor={COLORS.textMuted}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(text) => {
+                setEmail(text);
+                setError('');
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
+              editable={!loading}
             />
           </View>
           <View style={styles.inputWrap}>
@@ -130,8 +223,12 @@ export default function RegisterScreen({ navigation }) {
               placeholder="Create Password"
               placeholderTextColor={COLORS.textMuted}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(text) => {
+                setPassword(text);
+                setError('');
+              }}
               secureTextEntry
+              editable={!loading}
             />
           </View>
           <View style={styles.inputWrap}>
@@ -140,14 +237,18 @@ export default function RegisterScreen({ navigation }) {
               placeholder="Confirm Password"
               placeholderTextColor={COLORS.textMuted}
               value={confirm}
-              onChangeText={setConfirm}
+              onChangeText={(text) => {
+                setConfirm(text);
+                setError('');
+              }}
               secureTextEntry
+              editable={!loading}
             />
           </View>
         </View>
 
         {/* Terms */}
-        <TouchableOpacity style={styles.termsRow} onPress={() => setAgreed(!agreed)} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.termsRow} onPress={() => setAgreed(!agreed)} activeOpacity={0.7} disabled={loading}>
           <View style={[styles.checkbox, agreed && styles.checkboxActive]}>
             {agreed && <Ionicons name="checkmark" size={12} color={COLORS.white} />}
           </View>
@@ -160,13 +261,33 @@ export default function RegisterScreen({ navigation }) {
 
         {/* Create Button */}
         <TouchableOpacity
-          style={[styles.createBtn, !agreed && styles.createBtnDisabled]}
+          style={[styles.createBtn, (loading || !agreed) && styles.createBtnDisabled]}
           onPress={handleCreate}
-          disabled={!agreed}
+          disabled={loading || !agreed}
           activeOpacity={0.85}
         >
-          <Text style={styles.createBtnText}>Create Account</Text>
+          {loading ? (
+            <ActivityIndicator color={COLORS.white} />
+          ) : (
+            <Text style={styles.createBtnText}>Create Account</Text>
+          )}
         </TouchableOpacity>
+
+        {/* Mock Register Option (Dev Mode) */}
+        {isSupabaseNotConfigured && (
+          <>
+            <Text style={styles.mockModeText}>
+              💡 Tip: Configure Supabase in your .env file to enable authentication.
+            </Text>
+            <TouchableOpacity 
+              style={styles.mockLoginBtn} 
+              onPress={handleMockRegister}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.mockLoginBtnText}>Continue with Mock Data</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         <View style={styles.loginRow}>
           <Text style={styles.loginText}>Already have an account? </Text>
@@ -196,6 +317,23 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sub: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 28 },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.error + '15',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.error + '40',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 16,
+    gap: 8,
+  },
+  errorText: {
+    color: COLORS.error,
+    fontSize: 13,
+    flex: 1,
+  },
   section: { marginBottom: 20 },
   sectionLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '600', letterSpacing: 1, marginBottom: 14 },
   row: { marginBottom: 12 },
@@ -269,6 +407,28 @@ const styles = StyleSheet.create({
   },
   createBtnDisabled: { opacity: 0.5 },
   createBtnText: { color: COLORS.white, fontSize: 16, fontWeight: '700' },
+  mockModeText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  mockLoginBtn: {
+    backgroundColor: COLORS.accentOrange + '20',
+    borderRadius: RADIUS.md,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.accentOrange + '40',
+  },
+  mockLoginBtnText: {
+    color: COLORS.accentOrange,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   loginRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 16 },
   loginText: { color: COLORS.textSecondary, fontSize: 13 },
   loginLink: { color: COLORS.primary, fontSize: 13, fontWeight: '600' },

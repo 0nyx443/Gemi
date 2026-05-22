@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, SafeAreaView, KeyboardAvoidingView,
-  Platform, Dimensions,
+  Platform, Dimensions, ActivityIndicator, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS, SPACING } from '../data/theme';
@@ -14,12 +14,40 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
-  const { login } = useApp();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const { login, setIsLoggedIn } = useApp();
 
-  const handleLogin = () => {
-    login(email, password);
+  const handleLogin = async () => {
+    if (!email || !password) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      const success = await login(email, password);
+      if (success) {
+        navigation.replace('Main');
+      } else {
+        setError('Invalid email or password');
+      }
+    } catch (err) {
+      const errorMessage = err.message || 'Login failed. Please try again.';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMockLogin = () => {
+    // Allow users to continue with mock data for testing
+    setIsLoggedIn(true);
     navigation.replace('Main');
   };
+
+  const isSupabaseNotConfigured = error.includes('not configured');
 
   return (
     <SafeAreaView style={styles.container}>
@@ -34,13 +62,21 @@ export default function LoginScreen({ navigation }) {
         {/* Logo */}
         <View style={styles.logoWrap}>
           <View style={styles.logoCircle}>
-            <Text style={styles.logoLetter}>A</Text>
+            <Text style={styles.logoLetter}>G</Text>
           </View>
-          <Text style={styles.appName}>Aura</Text>
+          <Text style={styles.appName}>Gemi</Text>
         </View>
 
         <Text style={styles.heading}>Welcome Back</Text>
         <Text style={styles.subheading}>Ready to hit today's targets?</Text>
+
+        {/* Error Message */}
+        {error ? (
+          <View style={styles.errorBox}>
+            <Ionicons name="alert-circle" size={16} color={COLORS.error} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
 
         {/* Inputs */}
         <View style={styles.inputGroup}>
@@ -51,9 +87,13 @@ export default function LoginScreen({ navigation }) {
               placeholder="Email Address"
               placeholderTextColor={COLORS.textMuted}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(text) => {
+                setEmail(text);
+                setError('');
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
+              editable={!loading}
             />
           </View>
 
@@ -64,22 +104,35 @@ export default function LoginScreen({ navigation }) {
               placeholder="Password"
               placeholderTextColor={COLORS.textMuted}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(text) => {
+                setPassword(text);
+                setError('');
+              }}
               secureTextEntry={!showPass}
+              editable={!loading}
             />
-            <TouchableOpacity onPress={() => setShowPass(!showPass)} style={styles.eyeBtn}>
+            <TouchableOpacity onPress={() => setShowPass(!showPass)} style={styles.eyeBtn} disabled={loading}>
               <Ionicons name={showPass ? 'eye-outline' : 'eye-off-outline'} size={18} color={COLORS.textMuted} />
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.forgotBtn}>
+          <TouchableOpacity style={styles.forgotBtn} disabled={loading}>
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </TouchableOpacity>
         </View>
 
         {/* Login Button */}
-        <TouchableOpacity style={styles.loginBtn} onPress={handleLogin} activeOpacity={0.85}>
-          <Text style={styles.loginBtnText}>Log In</Text>
+        <TouchableOpacity 
+          style={[styles.loginBtn, loading && styles.loginBtnDisabled]} 
+          onPress={handleLogin} 
+          activeOpacity={0.85}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color={COLORS.white} />
+          ) : (
+            <Text style={styles.loginBtnText}>Log In</Text>
+          )}
         </TouchableOpacity>
 
         {/* Divider */}
@@ -91,20 +144,36 @@ export default function LoginScreen({ navigation }) {
 
         {/* Social */}
         <View style={styles.socialRow}>
-          <TouchableOpacity style={styles.socialBtn}>
+          <TouchableOpacity style={styles.socialBtn} disabled={loading}>
             <Ionicons name="logo-google" size={20} color={COLORS.textPrimary} />
             <Text style={styles.socialBtnText}>Google</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.socialBtn}>
+          <TouchableOpacity style={styles.socialBtn} disabled={loading}>
             <Ionicons name="logo-apple" size={20} color={COLORS.textPrimary} />
             <Text style={styles.socialBtnText}>Apple</Text>
           </TouchableOpacity>
         </View>
 
+        {/* Mock Login Option (Dev Mode) */}
+        {isSupabaseNotConfigured && (
+          <>
+            <Text style={styles.mockModeText}>
+              💡 Tip: Configure Supabase in your .env file to enable authentication.
+            </Text>
+            <TouchableOpacity 
+              style={styles.mockLoginBtn} 
+              onPress={handleMockLogin}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.mockLoginBtnText}>Continue with Mock Data</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
         {/* Register */}
         <View style={styles.registerRow}>
           <Text style={styles.registerText}>New to Aura? </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+          <TouchableOpacity onPress={() => navigation.navigate('Register')} disabled={loading}>
             <Text style={styles.registerLink}>Register Now</Text>
           </TouchableOpacity>
         </View>
@@ -180,6 +249,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.error + '15',
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.error + '40',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 16,
+    gap: 8,
+  },
+  errorText: {
+    color: COLORS.error,
+    fontSize: 13,
+    flex: 1,
+  },
   inputGroup: {
     gap: 12,
     marginBottom: 20,
@@ -226,6 +312,9 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
+  loginBtnDisabled: {
+    opacity: 0.7,
+  },
   loginBtnText: {
     color: COLORS.white,
     fontSize: 16,
@@ -268,6 +357,28 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 14,
     fontWeight: '500',
+  },
+  mockModeText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  mockLoginBtn: {
+    backgroundColor: COLORS.accentOrange + '20',
+    borderRadius: RADIUS.md,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.accentOrange + '40',
+  },
+  mockLoginBtnText: {
+    color: COLORS.accentOrange,
+    fontSize: 14,
+    fontWeight: '600',
   },
   registerRow: {
     flexDirection: 'row',

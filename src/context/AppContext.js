@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { workoutAPI, dietAPI, progressAPI } from '../services/api';
+import { authService } from '../services/auth';
 
 const AppContext = createContext();
 
+// Mock data fallback
 const initialWorkouts = [
   {
     id: 1,
@@ -51,7 +54,7 @@ const initialStats = {
 };
 
 const initialUser = {
-  name: 'John Benedict Reyes',
+  name: 'Cloyd',
   email: 'john@example.com',
   goal: 'Bulking Phase',
   height: 180,
@@ -69,6 +72,8 @@ export function AppProvider({ children }) {
   const [meals, setMeals] = useState(initialMeals);
   const [stats, setStats] = useState(initialStats);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [backendAvailable, setBackendAvailable] = useState(true);
   const [chatHistory, setChatHistory] = useState([
     {
       role: 'assistant',
@@ -82,11 +87,80 @@ export function AppProvider({ children }) {
     },
   ]);
 
-  const addWorkout = (workout) => {
-    setWorkouts((prev) => [...prev, { ...workout, id: Date.now() }]);
-  };
+  // Initialize - check auth and load data
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const hasSession = await authService.restoreSession();
+        setIsLoggedIn(hasSession);
 
-  const updateSet = (workoutId, setIndex, data) => {
+        if (hasSession) {
+          await loadUserData();
+        }
+      } catch (error) {
+        console.error('Init error:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    init();
+  }, []);
+
+  // Fetch data from backend
+  const loadUserData = useCallback(async () => {
+    try {
+      // Load workouts
+      const workoutData = await workoutAPI.getAll();
+      if (workoutData && Array.isArray(workoutData)) {
+        setWorkouts(workoutData);
+      }
+
+      // Load diet logs
+      const dietData = await dietAPI.getAll();
+      if (dietData && Array.isArray(dietData)) {
+        setMeals(dietData);
+      }
+
+      setBackendAvailable(true);
+    } catch (error) {
+      console.error('Error loading user data:', error);
+      setBackendAvailable(false);
+      // Keep mock data as fallback
+    }
+  }, []);
+
+  // Add workout to backend and local state
+  const addWorkout = useCallback(async (workout) => {
+    try {
+      const newWorkout = {
+        name: workout.name,
+        notes: workout.notes || '',
+        performed_at: workout.date || new Date().toISOString(),
+        sets: (workout.sets || []).map((s) => ({
+          exercise_name: workout.name,
+          set_number: s.set,
+          reps: s.reps,
+          weight_kg: s.weight,
+        })),
+      };
+
+      if (backendAvailable && isLoggedIn) {
+        const result = await workoutAPI.create(newWorkout);
+        setWorkouts((prev) => [...prev, result]);
+      } else {
+        // Fallback: add to local state
+        setWorkouts((prev) => [...prev, { ...workout, id: Date.now() }]);
+      }
+    } catch (error) {
+      console.error('Error adding workout:', error);
+      // Add to local state as fallback
+      setWorkouts((prev) => [...prev, { ...workout, id: Date.now() }]);
+    }
+  }, [backendAvailable, isLoggedIn]);
+
+  // Update set in a workout
+  const updateSet = useCallback((workoutId, setIndex, data) => {
     setWorkouts((prev) =>
       prev.map((w) => {
         if (w.id !== workoutId) return w;
@@ -95,9 +169,23 @@ export function AppProvider({ children }) {
         return { ...w, sets: newSets };
       })
     );
-  };
 
-  const addSet = (workoutId) => {
+    // Sync to backend if available
+    if (backendAvailable && isLoggedIn) {
+      const workout = workouts.find((w) => w.id === workoutId);
+      if (workout) {
+        workoutAPI.update(workoutId, {
+          name: workout.name,
+          notes: workout.notes || '',
+          performed_at: workout.date || new Date().toISOString(),
+          sets: workout.sets,
+        }).catch((error) => console.error('Error updating workout:', error));
+      }
+    }
+  }, [workouts, backendAvailable, isLoggedIn]);
+
+  // Add a set to a workout
+  const addSet = useCallback((workoutId) => {
     setWorkouts((prev) =>
       prev.map((w) => {
         if (w.id !== workoutId) return w;
@@ -111,42 +199,126 @@ export function AppProvider({ children }) {
         };
       })
     );
-  };
+  }, []);
 
-  const logMeal = (mealId, calories, description) => {
-    setMeals((prev) =>
-      prev.map((m) => {
-        if (m.id !== mealId) return m;
-        return { ...m, calories, description, logged: true };
-      })
-    );
-    setStats((prev) => ({
-      ...prev,
-      caloriesEaten: prev.caloriesEaten + calories,
-      caloriesRemaining: prev.caloriesRemaining - calories,
-    }));
-  };
+  // Log meal to backend
+  const logMeal = useCallback(async (mealId, calories, description) => {
+    try {
+      const mealData = {
+        meal_name: description || 'Meal',
+        calories: calories || 0,
+        logged_at: new Date().toISOString(),
+      };
 
-  const addChatMessage = (msg) => {
+      if (backendAvailable && isLoggedIn) {
+        await dietAPI.create(mealData);
+      }
+
+      // Update local state
+      setMeals((prev) =>
+        prev.map((m) => {
+          if (m.id !== mealId) return m;
+          return { ...m, calories, description, logged: true };
+        })
+      );
+
+      setStats((prev) => ({
+        ...prev,
+        caloriesEaten: prev.caloriesEaten + (calories || 0),
+        caloriesRemaining: prev.caloriesRemaining - (calories || 0),
+      }));
+    } catch (error) {
+      console.error('Error logging meal:', error);
+      // Update local state as fallback
+      setMeals((prev) =>
+        prev.map((m) => {
+          if (m.id !== mealId) return m;
+          return { ...m, calories, description, logged: true };
+        })
+      );
+    }
+  }, [backendAvailable, isLoggedIn]);
+
+  const addChatMessage = useCallback((msg) => {
     setChatHistory((prev) => [...prev, msg]);
-  };
+  }, []);
 
-  const login = (email, password) => {
-    setIsLoggedIn(true);
-    return true;
-  };
+  // Authentication functions
+  const login = useCallback(async (email, password) => {
+    try {
+      const data = await authService.signIn(email, password);
+      setIsLoggedIn(true);
+      setUser((prev) => ({
+        ...prev,
+        email: data.user.email,
+      }));
+      await loadUserData();
+      return true;
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
+    }
+  }, [loadUserData]);
 
-  const logout = () => setIsLoggedIn(false);
+  const signup = useCallback(async (email, password, userData) => {
+    try {
+      await authService.signUp(email, password, userData);
+      setIsLoggedIn(true);
+      setUser((prev) => ({
+        ...prev,
+        ...userData,
+        email,
+      }));
+      return true;
+    } catch (error) {
+      console.error('Signup error:', error);
+      return false;
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await authService.signOut();
+      setIsLoggedIn(false);
+      setUser(initialUser);
+      setWorkouts(initialWorkouts);
+      setMeals(initialMeals);
+      setStats(initialStats);
+      setChatHistory([]);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  }, []);
 
   return (
     <AppContext.Provider
       value={{
-        user, setUser,
-        workouts, addWorkout, updateSet, addSet,
-        meals, logMeal,
-        stats, setStats,
-        isLoggedIn, login, logout,
-        chatHistory, addChatMessage,
+        // User
+        user,
+        setUser,
+        // Workouts
+        workouts,
+        addWorkout,
+        updateSet,
+        addSet,
+        // Meals
+        meals,
+        logMeal,
+        // Stats
+        stats,
+        setStats,
+        // Auth
+        isLoggedIn,
+        setIsLoggedIn,
+        isLoading,
+        login,
+        signup,
+        logout,
+        // Chat
+        chatHistory,
+        addChatMessage,
+        // Backend
+        backendAvailable,
       }}
     >
       {children}
